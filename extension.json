@@ -1,0 +1,17 @@
+{
+  "name": "Saleae Measurements V2",
+  "apiVersion": "2.0.0",
+  "author": "shy coder",
+  "version": "0.0.1",
+  "description": "Saleae built-in V2 Measurements",
+  "extensions": {
+    "Voltage Measurements": {
+      "type": "AnalogMeasurement",
+      "entryPoint": "AnalogMeasurement.VoltageMeasurer"
+    },
+    "Pulse Measurements": {
+      "type": "AnalogMeasurement",
+      "entryPoint": "AnalogMeasurement.PulseMeasurer"
+    }
+  }
+}
