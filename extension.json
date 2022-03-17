@@ -7,11 +7,15 @@
   "extensions": {
     "Voltage Measurements": {
       "type": "AnalogMeasurement",
-      "entryPoint": "AnalogMeasurement.VoltageMeasurer"
+      "entryPoint": "measurements.VoltageMeasurer"
     },
     "Pulse Measurements": {
       "type": "AnalogMeasurement",
-      "entryPoint": "AnalogMeasurement.PulseMeasurer"
+      "entryPoint": "measurements.PulseMeasurer"
+    },
+    "Time Measurements": {
+      "type": "AnalogMeasurement",
+      "entryPoint": "measurements.TimeMeasurer"
     }
   }
 }

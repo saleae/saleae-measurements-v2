@@ -127,3 +127,79 @@ class PulseMeasurer(AnalogMeasurer):
         rise_time = second_crossing - first_crossing
 
         return(rise_time, None)
+
+
+class TimeMeasurer(AnalogMeasurer):
+    period = Measure("Period", type=float,
+                     description="Period", units="s")
+    frequency = Measure("Frequency", type=float,
+                        description="Frequency", units="Hz")
+    positive_width = Measure("Pos Width", type=float,
+                             description="Positive Pulse Width", units="s")
+    negative_width = Measure("Neg Width", type=float,
+                             description="Negative Pulse Width", units="s")
+    positive_duty = Measure("Pos Duty", type=float,
+                            description="Positive Duty Cycle", units="%")
+    negative_duty = Measure("Neg Duty", type=float,
+                            description="Negative Duty Cycle", units="%")
+
+    def measure_range(self, data: AnalogSpan):
+        start_index = int(len(data) / 2)
+
+        mid = (data.max + data.min) / 2
+
+        left_crossing = right_crossing = extra_crossing = None
+
+        # if the start location is above the mid level, we will find 2 edges to the right.
+        # otherwise, we will find 2 edges to the left.
+        is_start_above_mid = data[start_index] >= mid
+
+        left_func = data.rfind_lt if is_start_above_mid else data.rfind_ge
+        right_func = data.find_lt if is_start_above_mid else data.find_ge
+        extra_func = data.find_ge if is_start_above_mid else data.rfind_lt
+        left_crossing = left_func(mid, end=start_index)
+        right_crossing = right_func(mid, start=start_index)
+
+        if left_crossing is not None and right_crossing is not None:
+            right_crossing_time = data.sample_index_to_time(right_crossing)
+            left_crossing_time = data.sample_index_to_time(left_crossing)
+
+            main_width = float(right_crossing_time - left_crossing_time)
+
+            if is_start_above_mid:
+                self.positive_width.value = main_width
+            else:
+                self.negative_width.value = main_width
+
+            extra_crossing_origin = right_crossing if is_start_above_mid else left_crossing
+            if is_start_above_mid:
+                extra_crossing = extra_func(mid, start=extra_crossing_origin)
+            else:
+                extra_crossing = extra_func(mid, end=extra_crossing_origin)
+            if extra_crossing is not None:
+                extra_crossing_time = data.sample_index_to_time(extra_crossing)
+
+                first_crossing_time = left_crossing_time if is_start_above_mid else extra_crossing_time
+                last_crossing_time = extra_crossing_time if is_start_above_mid else right_crossing_time
+
+                extra_width = float((
+                    extra_crossing_time - right_crossing_time) if is_start_above_mid else (left_crossing_time - extra_crossing_time))
+
+                if is_start_above_mid:
+                    self.negative_width.value = extra_width
+                else:
+                    self.positive_width.value = extra_width
+
+                period = float(last_crossing_time - first_crossing_time)
+                positive_width = main_width if is_start_above_mid else extra_width
+                negative_width = extra_width if is_start_above_mid else main_width
+
+                frequency = 1 / period
+                positive_duty = positive_width / period * 100
+                negative_duty = negative_width / period * 100
+
+                self.period.value = period
+                self.frequency.value = frequency
+                self.positive_duty.value = positive_duty
+                self.negative_duty.value = negative_duty
+        pass
