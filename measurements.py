@@ -122,9 +122,8 @@ class PulseMeasurer(AnalogMeasurer):
             return error_response
 
         # TODO: implement sample_index_to_time
-        # rise_time = data.sample_index_to_time(
-        #    second_crossing) - data.sample_index_to_time(first_crossing)
-        rise_time = second_crossing - first_crossing
+        rise_time = float(data.sample_index_to_time(
+            second_crossing) - data.sample_index_to_time(first_crossing))
 
         return(rise_time, None)
 
