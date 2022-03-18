@@ -39,7 +39,7 @@ class VoltageMeasurer(AnalogMeasurer):
     top = Measure("Top", type=float, description="High Level", units="V")
     base = Measure("Base", type=float, description="Low Level", units="V")
     rms = Measure("RMS", type=float,
-                  description="Root Mean Square (RMS)", units="V<sub>rms</sub>")
+                  description="Root Mean Square (RMS)", units="V")
 
     def measure_range(self, data: AnalogSpan):
         self.minimum.value = data.min
@@ -168,14 +168,14 @@ class TimeMeasurer(AnalogMeasurer):
     negative_duty = Measure("Neg Duty", type=float,
                             description="Negative Duty Cycle", units="%")
     cycle_rms = Measure("Cycle RMS", type=float,
-                        description="Cycle Root Mean Square (RMS)", units="V<sub>rms</sub>")
+                        description="Cycle Root Mean Square (RMS)", units="V")
 
     def measure_range(self, data: AnalogSpan):
         start_index = int(len(data) / 2)
 
         mid = (data.max + data.min) / 2
 
-        left_crossing = right_crossing = extra_crossing = None
+        left_crossing = right_crossing = extra_left_crossing = extra_right_crossing = None
 
         # if the start location is above the mid level, we will find 2 edges to the right.
         # otherwise, we will find 2 edges to the left.
@@ -184,7 +184,8 @@ class TimeMeasurer(AnalogMeasurer):
 
         left_func = data.rfind_lt if is_start_above_mid else data.rfind_ge
         right_func = data.find_lt if is_start_above_mid else data.find_ge
-        extra_func = data.find_ge if is_start_above_mid else data.rfind_lt
+        extra_left_func = data.rfind_ge if is_start_above_mid else data.rfind_lt
+        extra_right_func = data.find_ge if is_start_above_mid else data.find_lt
         left_crossing = left_func(mid, end=start_index)
         right_crossing = right_func(mid, start=start_index)
 
@@ -199,20 +200,26 @@ class TimeMeasurer(AnalogMeasurer):
             else:
                 self.negative_width.value = main_width
 
+            extra_left_crossing = extra_left_func(mid, end=left_crossing)
+            extra_right_crossing = extra_right_func(mid, start=right_crossing)
+
             extra_crossing_origin = right_crossing if is_start_above_mid else left_crossing
-            if is_start_above_mid:
-                extra_crossing = extra_func(mid, start=extra_crossing_origin)
-            else:
-                extra_crossing = extra_func(mid, end=extra_crossing_origin)
-            if extra_crossing is not None:
-                extra_crossing_time = data.sample_index_to_time(extra_crossing)
-                first_crossing = left_crossing if is_start_above_mid else extra_crossing
-                last_crossing = extra_crossing if is_start_above_mid else right_crossing
+
+            if extra_left_crossing is not None or extra_right_crossing is not None:
+                # use the right side IF we started above the cycle, AND the right side is valid, OR
+                # IF we started below the cycle, BUT the left side is not valid
+                use_right_side = (is_start_above_mid and extra_right_crossing is not None) or (
+                    not is_start_above_mid and extra_left_crossing is None)
+
+                extra_crossing_time = data.sample_index_to_time(
+                    extra_right_crossing) if use_right_side else data.sample_index_to_time(extra_left_crossing)
+                first_crossing = left_crossing if use_right_side else extra_left_crossing
+                last_crossing = extra_right_crossing if use_right_side else right_crossing
                 first_crossing_time = data.sample_index_to_time(first_crossing)
                 last_crossing_time = data.sample_index_to_time(last_crossing)
 
                 extra_width = float((
-                    extra_crossing_time - right_crossing_time) if is_start_above_mid else (left_crossing_time - extra_crossing_time))
+                    extra_crossing_time - right_crossing_time) if use_right_side else (left_crossing_time - extra_crossing_time))
 
                 if is_start_above_mid:
                     self.negative_width.value = extra_width
