@@ -1,7 +1,16 @@
 from saleae.measurements import AnalogMeasurer, Measure
 from saleae.data import AnalogSpan
 from statistics import mode
+import math
 
+
+def rms(data: AnalogSpan):
+    # TODO: numpy accelerate
+    sum_of_squares = 0
+    for x in data:
+        sum_of_squares += x ** 2
+    rms = math.sqrt(sum_of_squares / len(data))
+    return rms
 
 class VoltageMeasurer(AnalogMeasurer):
     peak_to_peak = Measure("Peak-to-Peak", type=float,
@@ -17,6 +26,7 @@ class VoltageMeasurer(AnalogMeasurer):
 
     top = Measure("Top", type=float, description="High Level", units="V")
     base = Measure("Base", type=float, description="Low Level", units="V")
+    rms = Measure("RMS", type=float, description="Root Mean Square (RMS)", units="V<sub>rms</sub>")
 
     def measure_range(self, data: AnalogSpan):
         self.minimum.value = data.min
@@ -43,6 +53,9 @@ class VoltageMeasurer(AnalogMeasurer):
 
         if self.amplitude.enabled:
             self.amplitude.value = high - low
+
+        if self.rms.enabled:
+            self.rms.value = rms(data)
 
 
 class PulseMeasurer(AnalogMeasurer):
@@ -141,6 +154,7 @@ class TimeMeasurer(AnalogMeasurer):
                             description="Positive Duty Cycle", units="%")
     negative_duty = Measure("Neg Duty", type=float,
                             description="Negative Duty Cycle", units="%")
+    cycle_rms = Measure("Cycle RMS", type=float, description="Cycle Root Mean Square (RMS)", units="V<sub>rms</sub>")
 
     def measure_range(self, data: AnalogSpan):
         start_index = int(len(data) / 2)
@@ -177,9 +191,10 @@ class TimeMeasurer(AnalogMeasurer):
                 extra_crossing = extra_func(mid, end=extra_crossing_origin)
             if extra_crossing is not None:
                 extra_crossing_time = data.sample_index_to_time(extra_crossing)
-
-                first_crossing_time = left_crossing_time if is_start_above_mid else extra_crossing_time
-                last_crossing_time = extra_crossing_time if is_start_above_mid else right_crossing_time
+                first_crossing = left_crossing if is_start_above_mid else extra_crossing
+                last_crossing = extra_crossing if is_start_above_mid else right_crossing
+                first_crossing_time = data.sample_index_to_time(first_crossing)
+                last_crossing_time = data.sample_index_to_time(last_crossing)
 
                 extra_width = float((
                     extra_crossing_time - right_crossing_time) if is_start_above_mid else (left_crossing_time - extra_crossing_time))
@@ -201,4 +216,7 @@ class TimeMeasurer(AnalogMeasurer):
                 self.frequency.value = frequency
                 self.positive_duty.value = positive_duty
                 self.negative_duty.value = negative_duty
-        pass
+
+                if self.cycle_rms.enabled:
+                    slice = data[first_crossing:last_crossing]
+                    self.cycle_rms.value = rms(slice)
