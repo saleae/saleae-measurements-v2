@@ -12,6 +12,18 @@ def rms(data: AnalogSpan):
     rms = math.sqrt(sum_of_squares / len(data))
     return rms
 
+
+def compute_high(data: AnalogSpan, mid: float):
+    # High & Low can be computed several different ways. This uses the "mode" method.
+    high = mode(x for x in data if x >= mid)
+    return high
+
+
+def compute_low(data: AnalogSpan, mid: float):
+    low = mode(x for x in data if x < mid)
+    return low
+
+
 class VoltageMeasurer(AnalogMeasurer):
     peak_to_peak = Measure("Peak-to-Peak", type=float,
                            description="Peak to Peak", units="V")
@@ -26,7 +38,8 @@ class VoltageMeasurer(AnalogMeasurer):
 
     top = Measure("Top", type=float, description="High Level", units="V")
     base = Measure("Base", type=float, description="Low Level", units="V")
-    rms = Measure("RMS", type=float, description="Root Mean Square (RMS)", units="V<sub>rms</sub>")
+    rms = Measure("RMS", type=float,
+                  description="Root Mean Square (RMS)", units="V<sub>rms</sub>")
 
     def measure_range(self, data: AnalogSpan):
         self.minimum.value = data.min
@@ -40,15 +53,14 @@ class VoltageMeasurer(AnalogMeasurer):
         if self.mean.enabled:
             self.mean.value = sum(data) / len(data)
 
-        # amplitude is high - low. How should those be defined?
-        # TODO: consider computing high/low using a different method.
+        # amplitude is high - low.
         high = low = None
         if self.top.enabled or self.amplitude.enabled:
-            high = mode(x for x in data if x >= mid)
+            high = compute_high(data, mid)
             self.top.value = high
 
         if self.base.enabled or self.amplitude.enabled:
-            low = mode(x for x in data if x < mid)
+            low = compute_low(data, mid)
             self.base.value = low
 
         if self.amplitude.enabled:
@@ -58,11 +70,14 @@ class VoltageMeasurer(AnalogMeasurer):
             self.rms.value = rms(data)
 
 
+risetime_thresholds_90 = (0.1, 0.9)
+
+
 class PulseMeasurer(AnalogMeasurer):
     rise_time = Measure("Rise Time", type=float,
                         description="Rise Time from 10% to 90%", units="s")
     fall_time = Measure("Fall Time", type=float,
-                        description="Fall Time from 90% to 91%", units="s")
+                        description="Fall Time from 90% to 10%", units="s")
     positive_overshoot = Measure("+Overshoot", type=float,
                                  description="Positive Overshoot", units="V")
     negative_overshoot = Measure("-Overshoot", type=float,
@@ -73,14 +88,14 @@ class PulseMeasurer(AnalogMeasurer):
         high = low = None
 
         if self.rise_time.enabled or self.fall_time.enabled or self.positive_overshoot.enabled:
-            high = mode(x for x in data if x >= mid)
+            high = compute_high(data, mid)
 
         if self.rise_time.enabled or self.fall_time.enabled or self.negative_overshoot.enabled:
-            low = mode(x for x in data if x < mid)
+            low = compute_low(data, mid)
 
         if self.rise_time.enabled:
-            low_threshold = (high - low) * 0.1 + low
-            high_threshold = (high - low) * 0.9 + low
+            low_threshold = (high - low) * risetime_thresholds_90[0] + low
+            high_threshold = (high - low) * risetime_thresholds_90[1] + low
 
             rise_time, error = self.find_rise_fall_time(
                 low_threshold, high_threshold, data)
@@ -91,8 +106,8 @@ class PulseMeasurer(AnalogMeasurer):
                 self.rise_time.value = rise_time
 
         if self.fall_time.enabled:
-            low_threshold = (high - low) * 0.1 + low
-            high_threshold = (high - low) * 0.9 + low
+            low_threshold = (high - low) * risetime_thresholds_90[0] + low
+            high_threshold = (high - low) * risetime_thresholds_90[1] + low
 
             fall_time, error = self.find_rise_fall_time(
                 high_threshold, low_threshold, data)
@@ -110,7 +125,6 @@ class PulseMeasurer(AnalogMeasurer):
 
     def find_rise_fall_time(self, first_threshold, second_threshold, data: AnalogSpan):
         find_start = find_crossing = None
-        error_response = (None, "Not Found")
         if second_threshold >= first_threshold:
             find_start = data.find_lt
             find_crossing = data.find_ge
@@ -121,20 +135,19 @@ class PulseMeasurer(AnalogMeasurer):
         # find the first point that's below the start of the rising edge or above the start of the falling edge, to set the search origin.
         search_start = find_start(first_threshold)
         if search_start is None:
-            return error_response
+            return (None, "Edge Not Found")
 
         # find the first crossing of the first threshold
         first_crossing = find_crossing(first_threshold, start=search_start)
         if first_crossing is None:
-            return error_response
+            return (None, "1st Edge Not Found")
 
         # then find from there the first crossing of the second threshold
         second_crossing = find_crossing(
             second_threshold, start=first_crossing)
         if second_crossing is None:
-            return error_response
+            return (None, "2nd Edge Not Found")
 
-        # TODO: implement sample_index_to_time
         rise_time = float(data.sample_index_to_time(
             second_crossing) - data.sample_index_to_time(first_crossing))
 
@@ -154,7 +167,8 @@ class TimeMeasurer(AnalogMeasurer):
                             description="Positive Duty Cycle", units="%")
     negative_duty = Measure("Neg Duty", type=float,
                             description="Negative Duty Cycle", units="%")
-    cycle_rms = Measure("Cycle RMS", type=float, description="Cycle Root Mean Square (RMS)", units="V<sub>rms</sub>")
+    cycle_rms = Measure("Cycle RMS", type=float,
+                        description="Cycle Root Mean Square (RMS)", units="V<sub>rms</sub>")
 
     def measure_range(self, data: AnalogSpan):
         start_index = int(len(data) / 2)
@@ -165,6 +179,7 @@ class TimeMeasurer(AnalogMeasurer):
 
         # if the start location is above the mid level, we will find 2 edges to the right.
         # otherwise, we will find 2 edges to the left.
+        # TODO: support a fallback, where if a cycle isn't found on one side, we should search the otherside.
         is_start_above_mid = data[start_index] >= mid
 
         left_func = data.rfind_lt if is_start_above_mid else data.rfind_ge
@@ -220,3 +235,25 @@ class TimeMeasurer(AnalogMeasurer):
                 if self.cycle_rms.enabled:
                     slice = data[first_crossing:last_crossing]
                     self.cycle_rms.value = rms(slice)
+            else:
+                # all 3 point measurements failed.
+                error_string = "3rd Crossing Not Found"
+                self.period.error = error_string
+                self.frequency.error = error_string
+                self.positive_duty.error = error_string
+                self.negative_duty.error = error_string
+                self.cycle_rms.error = error_string
+                if is_start_above_mid:
+                    self.negative_width.error = error_string
+                else:
+                    self.positive_width.error = error_string
+        else:
+            # all measurements failed
+            error_string = "Crossings Not Found"
+            self.period.error = error_string
+            self.frequency.error = error_string
+            self.positive_width.error = error_string
+            self.negative_width.error = error_string
+            self.positive_duty.error = error_string
+            self.negative_duty.error = error_string
+            self.cycle_rms.error = error_string
