@@ -12,7 +12,7 @@ def rms(data: AnalogSpan):
 
 def histogram_mode(data: AnalogSpan, filter):
     hist, bins = data.histogram()
-    _count, index = max((count, index) for index, count in enumerate(hist) if filter((bins[index] + bins[index]) / 2))
+    _count, index = max((count, index) for index, count in enumerate(hist) if filter((bins[index] + bins[index + 1]) / 2))
     return (bins[index] + bins[index + 1]) / 2
 
 # High & Low can be computed several different ways. If this is False, the "mode" method will be used
@@ -246,7 +246,6 @@ class TimeMeasurer(AnalogMeasurer):
                 self.negative_duty.value = negative_duty
 
                 if self.cycle_rms.enabled:
-                    print(first_crossing, last_crossing)
                     slice = data[first_crossing:last_crossing]
                     self.cycle_rms.value = rms(slice)
             else:
