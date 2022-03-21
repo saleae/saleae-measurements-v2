@@ -1,6 +1,6 @@
 {
   "name": "Saleae Measurements V2",
-  "apiVersion": "2.0.0",
+  "apiVersion": "1.1.0",
   "author": "shy coder",
   "version": "0.0.1",
   "description": "Saleae built-in V2 Measurements",
