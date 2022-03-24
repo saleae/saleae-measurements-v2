@@ -1,4 +1,4 @@
-from saleae.measurements import AnalogMeasurer, Measure, Annotation, HorizontalRule
+from saleae.measurements import AnalogMeasurer, Measure, Annotation, HorizontalRule, VerticalRule
 from saleae.data import AnalogSpan
 from statistics import mode
 import math
@@ -98,6 +98,13 @@ class PulseMeasurer(AnalogMeasurer):
     negative_overshoot = Measure("-Overshoot", type=float,
                                  description="Negative Overshoot", units="V")
 
+    rise_time_annotation = Annotation(measures=[rise_time])
+    fall_time_annotation = Annotation(measures=[fall_time])
+    rise_fall_threshold_annotation = Annotation(
+        measures=[rise_time, fall_time])
+    positive_overshoot_annotation = Annotation(measures=[positive_overshoot])
+    negative_overshoot_annotation = Annotation(measures=[negative_overshoot])
+
     def measure_range(self, data: AnalogSpan):
         mid = (data.max + data.min) / 2
         high = low = None
@@ -108,35 +115,44 @@ class PulseMeasurer(AnalogMeasurer):
         if self.rise_time.enabled or self.fall_time.enabled or self.negative_overshoot.enabled:
             low = compute_low(data, mid)
 
-        if self.rise_time.enabled:
+        low_threshold = high_threshold = None
+        if self.rise_time.enabled or self.fall_time.enabled:
             low_threshold = (high - low) * risetime_thresholds_90[0] + low
             high_threshold = (high - low) * risetime_thresholds_90[1] + low
+            self.rise_fall_threshold_annotation.value = [HorizontalRule(
+                value=low_threshold), HorizontalRule(value=high_threshold)]
 
-            rise_time, error = self.find_rise_fall_time(
+        if self.rise_time.enabled:
+            rise_time, first_crossing_time, second_crossing_time, error = self.find_rise_fall_time(
                 low_threshold, high_threshold, data)
 
             if error:
                 self.rise_time.error = error
             elif rise_time:
                 self.rise_time.value = rise_time
+                self.rise_time_annotation.value = [VerticalRule(
+                    time=first_crossing_time), VerticalRule(time=second_crossing_time)]
 
         if self.fall_time.enabled:
-            low_threshold = (high - low) * risetime_thresholds_90[0] + low
-            high_threshold = (high - low) * risetime_thresholds_90[1] + low
-
-            fall_time, error = self.find_rise_fall_time(
+            fall_time, first_crossing_time, second_crossing_time, error = self.find_rise_fall_time(
                 high_threshold, low_threshold, data)
 
             if error:
                 self.fall_time.error = error
             elif fall_time:
                 self.fall_time.value = fall_time
+                self.fall_time_annotation.value = [VerticalRule(
+                    time=first_crossing_time), VerticalRule(time=second_crossing_time)]
 
         if self.positive_overshoot.enabled:
             self.positive_overshoot.value = data.max - high
+            self.positive_overshoot_annotation.value = [HorizontalRule(
+                value=high), HorizontalRule(value=data.max)]
 
         if self.negative_overshoot.enabled:
             self.negative_overshoot.value = low - data.min
+            self.negative_overshoot_annotation.value = [HorizontalRule(
+                value=low), HorizontalRule(value=data.min)]
 
     def find_rise_fall_time(self, first_threshold, second_threshold, data: AnalogSpan):
         find_start = find_crossing = None
@@ -150,23 +166,25 @@ class PulseMeasurer(AnalogMeasurer):
         # find the first point that's below the start of the rising edge or above the start of the falling edge, to set the search origin.
         search_start = find_start(first_threshold)
         if search_start is None:
-            return (None, "Edge Not Found")
+            return (None, None, None, "Edge Not Found")
 
         # find the first crossing of the first threshold
         first_crossing = find_crossing(first_threshold, start=search_start)
         if first_crossing is None:
-            return (None, "1st Edge Not Found")
+            return (None, None, None, "1st Edge Not Found")
 
         # then find from there the first crossing of the second threshold
         second_crossing = find_crossing(
             second_threshold, start=first_crossing)
         if second_crossing is None:
-            return (None, "2nd Edge Not Found")
+            return (None, None, None, "2nd Edge Not Found")
 
-        rise_time = float(data.sample_index_to_time(
-            second_crossing) - data.sample_index_to_time(first_crossing))
+        first_crossing_time = data.sample_index_to_time(first_crossing)
+        second_crossing_time = data.sample_index_to_time(second_crossing)
 
-        return(rise_time, None)
+        rise_time = float(second_crossing_time - first_crossing_time)
+
+        return(rise_time, first_crossing_time, second_crossing_time, None)
 
 
 class TimeMeasurer(AnalogMeasurer):
