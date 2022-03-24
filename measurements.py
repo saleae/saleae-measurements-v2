@@ -1,4 +1,4 @@
-from saleae.measurements import AnalogMeasurer, Measure
+from saleae.measurements import AnalogMeasurer, Measure, Annotation, HorizontalRule
 from saleae.data import AnalogSpan
 from statistics import mode
 import math
@@ -27,7 +27,6 @@ def compute_low(data: AnalogSpan, mid: float):
 class VoltageMeasurer(AnalogMeasurer):
     peak_to_peak = Measure("Peak-to-Peak", type=float,
                            description="Peak to Peak", units="V")
-
     minimum = Measure("Min", type=float, description="Minimum", units="V")
     maximum = Measure("Max", type=float, description="Maximum", units="V")
     mean = Measure("Mean", type=float, description="Mean", units="V")
@@ -41,6 +40,14 @@ class VoltageMeasurer(AnalogMeasurer):
     rms = Measure("RMS", type=float,
                   description="Root Mean Square (RMS)", units="V")
 
+    max_annotation = Annotation(measures=[peak_to_peak, maximum])
+    min_annotation = Annotation(measures=[peak_to_peak, minimum])
+
+    mean_annotation = Annotation(measures=[mean])
+    mid_annotation = Annotation(measures=[mid])
+    top_annotation = Annotation(measures=[top, amplitude])
+    base_annotation = Annotation(measures=[base, amplitude])
+
     def measure_range(self, data: AnalogSpan):
         self.minimum.value = data.min
         self.maximum.value = data.max
@@ -48,20 +55,28 @@ class VoltageMeasurer(AnalogMeasurer):
         mid = (data.max + data.min) / 2
         self.mid.value = mid
 
+        self.max_annotation.value = HorizontalRule(value=data.max)
+        self.min_annotation.value = HorizontalRule(value=data.min)
+        self.mid_annotation.value = HorizontalRule(value=mid)
+
         # mean is the average of all samples.
         # TODO: replace with numpy
         if self.mean.enabled:
-            self.mean.value = sum(data) / len(data)
+            mean = sum(data) / len(data)
+            self.mean.value = mean
+            self.mean_annotation.value = HorizontalRule(value=mean)
 
         # amplitude is high - low.
         high = low = None
         if self.top.enabled or self.amplitude.enabled:
             high = compute_high(data, mid)
             self.top.value = high
+            self.top_annotation.value = HorizontalRule(value=high)
 
         if self.base.enabled or self.amplitude.enabled:
             low = compute_low(data, mid)
             self.base.value = low
+            self.base_annotation.value = HorizontalRule(value=low)
 
         if self.amplitude.enabled:
             self.amplitude.value = high - low
