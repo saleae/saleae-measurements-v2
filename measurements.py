@@ -203,6 +203,13 @@ class TimeMeasurer(AnalogMeasurer):
     cycle_rms = Measure("Cycle RMS", type=float,
                         description="Cycle Root Mean Square (RMS)", units="V")
 
+    positive_side_annotation = Annotation(
+        measures=[period, frequency, positive_width, positive_duty, negative_duty, cycle_rms])
+    negative_side_annotation = Annotation(
+        measures=[period, frequency, negative_width, positive_duty, negative_duty, cycle_rms])
+    center_annotation = Annotation(
+        measures=[positive_width, negative_width, positive_duty, negative_duty])
+
     def measure_range(self, data: AnalogSpan):
         start_index = int(len(data) / 2)
 
@@ -236,8 +243,6 @@ class TimeMeasurer(AnalogMeasurer):
             extra_left_crossing = extra_left_func(mid, end=left_crossing)
             extra_right_crossing = extra_right_func(mid, start=right_crossing)
 
-            extra_crossing_origin = right_crossing if is_start_above_mid else left_crossing
-
             if extra_left_crossing is not None or extra_right_crossing is not None:
                 # use the right side IF we started above the cycle, AND the right side is valid, OR
                 # IF we started below the cycle, BUT the left side is not valid
@@ -248,8 +253,22 @@ class TimeMeasurer(AnalogMeasurer):
                     extra_right_crossing) if use_right_side else data.sample_index_to_time(extra_left_crossing)
                 first_crossing = left_crossing if use_right_side else extra_left_crossing
                 last_crossing = extra_right_crossing if use_right_side else right_crossing
+                center_crossing = right_crossing if use_right_side else left_crossing
                 first_crossing_time = data.sample_index_to_time(first_crossing)
                 last_crossing_time = data.sample_index_to_time(last_crossing)
+                center_crossing_time = data.sample_index_to_time(
+                    center_crossing)
+
+                self.center_annotation.value = VerticalRule(
+                    time=center_crossing_time)
+
+                # left side is positive IF: (A) is_start_above_mid & use_right_side or (B) !is_start_above_mid & !use_right_side
+                first_time_is_positive = (is_start_above_mid and use_right_side) or (
+                    not is_start_above_mid and not use_right_side)
+                self.positive_side_annotation.value = VerticalRule(
+                    time=first_crossing_time if first_time_is_positive else last_crossing_time)
+                self.negative_side_annotation.value = VerticalRule(
+                    time=last_crossing_time if first_time_is_positive else first_crossing_time)
 
                 extra_width = float((
                     extra_crossing_time - right_crossing_time) if use_right_side else (left_crossing_time - extra_crossing_time))
@@ -285,8 +304,18 @@ class TimeMeasurer(AnalogMeasurer):
                 self.cycle_rms.error = error_string
                 if is_start_above_mid:
                     self.negative_width.error = error_string
+
+                    self.positive_side_annotation.value = VerticalRule(
+                        time=left_crossing_time)
+                    self.center_annotation.value = VerticalRule(
+                        time=right_crossing_time)
                 else:
                     self.positive_width.error = error_string
+
+                    self.negative_side_annotation.value = VerticalRule(
+                        time=left_crossing_time)
+                    self.center_annotation.value = VerticalRule(
+                        time=right_crossing_time)
         else:
             # all measurements failed
             error_string = "Crossings Not Found"
