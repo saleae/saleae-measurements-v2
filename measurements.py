@@ -1,7 +1,10 @@
-from saleae.measurements import AnalogMeasurer, Measure, Annotation, HorizontalRule, VerticalRule
-from saleae.data import AnalogSpan
-from statistics import mode
 import math
+from statistics import mode
+from typing import Optional, Tuple
+
+from saleae.data import AnalogSpan, GraphTimeDelta
+from saleae.measurements import (AnalogMeasurer, Annotation, HorizontalRule,
+                                 Measure, VerticalRule)
 
 
 def rms(data: AnalogSpan):
@@ -154,7 +157,7 @@ class PulseMeasurer(AnalogMeasurer):
             self.negative_overshoot_annotation.value = [HorizontalRule(
                 value=low), HorizontalRule(value=data.min)]
 
-    def find_rise_fall_time(self, first_threshold, second_threshold, data: AnalogSpan):
+    def find_rise_fall_time(self, first_threshold: float, second_threshold: float, data: AnalogSpan) -> Tuple[Optional[float], Optional[GraphTimeDelta], Optional[GraphTimeDelta], Optional[str]]:
         find_start = find_crossing = None
         if second_threshold >= first_threshold:
             find_start = data.find_lt
