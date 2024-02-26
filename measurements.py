@@ -13,18 +13,23 @@ def rms(data: AnalogSpan):
     rms = math.sqrt(sum_of_squares / len(data))
     return rms
 
+
 def histogram_mode(data: AnalogSpan, filter):
     hist, bins = data.histogram()
-    _count, index = max((count, index) for index, count in enumerate(hist) if filter((bins[index] + bins[index + 1]) / 2))
+    _count, index = max((count, index) for index, count in enumerate(
+        hist) if filter((bins[index] + bins[index + 1]) / 2))
     return (bins[index] + bins[index + 1]) / 2
+
 
 # High & Low can be computed several different ways. If this is False, the "mode" method will be used
 use_histogram_for_mode = True
+
 
 def compute_high(data: AnalogSpan, mid: float):
     if use_histogram_for_mode:
         return histogram_mode(data, lambda x: x >= mid)
     return mode(x for x in data if x >= mid)
+
 
 def compute_low(data: AnalogSpan, mid: float):
     if use_histogram_for_mode:
