@@ -168,37 +168,128 @@ class PulseMeasurer(AnalogMeasurer):
             self.negative_overshoot_annotation.value = [HorizontalRule(
                 value=low), HorizontalRule(value=data.min)]
 
-    def find_rise_fall_time(self, first_threshold: float, second_threshold: float, data: AnalogSpan) -> Tuple[Optional[float], Optional[GraphTimeDelta], Optional[GraphTimeDelta], Optional[str]]:
-        find_start = find_crossing = None
+    def find_rise_fall_time_directional(self, first_threshold: float, second_threshold: float, data: AnalogSpan, start: int, reverse: bool) -> Tuple[Optional[float], Optional[GraphTimeDelta], Optional[GraphTimeDelta], Optional[str]]:
+        # This measures the rise or fall time, starting the search at the provided index and moving in the specified direction.
+        # if the search start is between the thresholds, we will back up the start point to the last point that satisfied the first threshold, if and only if the start location is within the correct edge direction.
+        # when running in reverse, we will find the second threshold first. This allows you to call this function in both directions with the same thresholds.
+        find_start = find_crossing = find_backtrack_crossing = find_backtrack_start = None
+        # start_key and end_key are used to specify the direction of the search when calling find_* or rfind_* functions.
+        # when searching backwards, the search begins at the specified end sample, and continues toward the start of the data.
+        start_key = 'start'
+        end_key = 'end'
+        if reverse:
+            start_key = 'end'
+            end_key = 'start'
+
         if second_threshold >= first_threshold:
             find_start = data.find_lt
             find_crossing = data.find_ge
+            find_backtrack_crossing = data.rfind_le
+            find_backtrack_start = data.rfind_lt
+            if reverse:
+                temp_threshold = first_threshold
+                first_threshold = second_threshold
+                second_threshold = temp_threshold
+                find_start = data.rfind_gt
+                find_crossing = data.rfind_le
+                find_backtrack_crossing = data.find_ge
+                find_backtrack_start = data.find_gt
         else:
             find_start = data.find_gt
             find_crossing = data.find_le
+            find_backtrack_crossing = data.rfind_ge
+            find_backtrack_start = data.rfind_gt
+            if reverse:
+                temp_threshold = first_threshold
+                first_threshold = second_threshold
+                second_threshold = temp_threshold
+                find_start = data.rfind_lt
+                find_crossing = data.rfind_ge
+                find_backtrack_crossing = data.find_le
+                find_backtrack_start = data.find_lt
+
+        # check to see if the start point is between the thresholds.
+        high_threshold = max(first_threshold, second_threshold)
+        low_threshold = min(first_threshold, second_threshold)
+        if low_threshold <= data[start] and data[start] <= high_threshold:
+            # We could be inside a rising or falling edge. We only care if we're inside the edge we're currently looking for.
+            next_start = find_start(
+                first_threshold, **{start_key: start})
+            next_end = find_crossing(
+                second_threshold, **{start_key: start})
+            # if ONLY next_edge is found, or if both are found, but next end is before next start, then we have a a logical end point and we should back-up if possible.
+            if next_end is not None or (next_start is not None and next_end is not None and next_end < next_start):
+                # we're inside the edge. We need to back the start point up.
+                backtracked_start = find_backtrack_start(
+                    first_threshold, **{end_key: start})
+                # only back-up if there actually is a crossing to backup to.
+                if backtracked_start is not None:
+                    start = backtracked_start
 
         # find the first point that's below the start of the rising edge or above the start of the falling edge, to set the search origin.
-        search_start = find_start(first_threshold)
+        search_start = find_start(first_threshold, **{start_key: start})
         if search_start is None:
             return (None, None, None, "Edge Not Found")
 
         # find the first crossing of the first threshold
-        first_crossing = find_crossing(first_threshold, start=search_start)
+        first_crossing = find_crossing(
+            first_threshold, **{start_key: search_start})
         if first_crossing is None:
             return (None, None, None, "1st Edge Not Found")
 
         # then find from there the first crossing of the second threshold
         second_crossing = find_crossing(
-            second_threshold, start=first_crossing)
+            second_threshold, **{start_key: first_crossing})
         if second_crossing is None:
             return (None, None, None, "2nd Edge Not Found")
 
-        first_crossing_time = data.sample_index_to_time(first_crossing)
+        # back up to the last sample that satisfied the first threshold, and use that as the first_crossing instead. This rejects noise.
+        first_crossing_backtrack = find_backtrack_crossing(
+            first_threshold, **{end_key: second_crossing})
+        if first_crossing_backtrack is None:
+            return (None, None, None, "Error")
+
+        first_crossing_time = data.sample_index_to_time(
+            first_crossing_backtrack)
         second_crossing_time = data.sample_index_to_time(second_crossing)
 
-        rise_time = float(second_crossing_time - first_crossing_time)
+        rise_time = abs(float(second_crossing_time - first_crossing_time))
 
-        return(rise_time, first_crossing_time, second_crossing_time, None)
+        if reverse:
+            return (rise_time, second_crossing_time, first_crossing_time, None)
+
+        return (rise_time, first_crossing_time, second_crossing_time, None)
+
+    def find_rise_fall_time(self, first_threshold: float, second_threshold: float, data: AnalogSpan) -> Tuple[Optional[float], Optional[GraphTimeDelta], Optional[GraphTimeDelta], Optional[str]]:
+        # use first_threshold > second_threshold to find the fall time. Otherwise, find the rise time.
+        center_index = int(len(data) / 2)
+        center_time = data.sample_index_to_time(center_index)
+        # check for the rise/fall time, starting to the right of the center of the data.
+        right_rise_time, right_first_crossing_time, right_second_crossing_time, right_error = self.find_rise_fall_time_directional(
+            first_threshold, second_threshold, data, center_index, False)
+
+        left_rise_time, left_first_crossing_time, left_second_crossing_time, left_error = self.find_rise_fall_time_directional(
+            first_threshold, second_threshold, data, center_index, True)
+
+        # if we found an event on both sides of the center, use the one with the nearest crossing time..
+        if right_rise_time and left_rise_time and left_second_crossing_time and right_first_crossing_time:
+            # find which side has the nearest edge.
+            left_side_distance = abs(
+                float(center_time - left_second_crossing_time))
+            right_side_distance = abs(
+                float(right_first_crossing_time - center_time))
+            if left_side_distance < right_side_distance:
+                return (left_rise_time, left_first_crossing_time, left_second_crossing_time, left_error)
+            else:
+                return (right_rise_time, right_first_crossing_time, right_second_crossing_time, right_error)
+
+        elif right_rise_time:
+            return (right_rise_time, right_first_crossing_time, right_second_crossing_time, right_error)
+        elif left_rise_time:
+            return (left_rise_time, left_first_crossing_time, left_second_crossing_time, left_error)
+        else:
+            error = right_error if right_error else left_error
+            return (None, None, None, error if error else "Edge Not Found")
 
 
 class TimeMeasurer(AnalogMeasurer):
