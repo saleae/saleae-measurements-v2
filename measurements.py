@@ -6,6 +6,7 @@ from saleae.data import AnalogSpan, GraphTimeDelta
 from saleae.measurements import (AnalogMeasurer, Annotation, HorizontalRule,
                                  Measure, VerticalRule)
 
+CLIPPED_ERROR = 'Clipped'
 
 def rms(data: AnalogSpan):
     # TODO: numpy accelerate
@@ -62,6 +63,18 @@ class VoltageMeasurer(AnalogMeasurer):
     base_annotation = Annotation(measures=[base, amplitude])
 
     def measure_range(self, data: AnalogSpan):
+        if data.clipped:
+            self.peak_to_peak.error = CLIPPED_ERROR
+            self.minimum.error = CLIPPED_ERROR
+            self.maximum.error = CLIPPED_ERROR
+            self.mean.error = CLIPPED_ERROR
+            self.mid.error = CLIPPED_ERROR
+            self.amplitude.error = CLIPPED_ERROR
+            self.top.error = CLIPPED_ERROR
+            self.base.error = CLIPPED_ERROR
+            self.rms.error = CLIPPED_ERROR
+            return
+
         self.minimum.value = data.min
         self.maximum.value = data.max
         self.peak_to_peak.value = data.max - data.min
@@ -120,6 +133,13 @@ class PulseMeasurer(AnalogMeasurer):
     negative_overshoot_annotation = Annotation(measures=[negative_overshoot])
 
     def measure_range(self, data: AnalogSpan):
+        if data.clipped:
+            self.rise_time.error = CLIPPED_ERROR
+            self.fall_time.error = CLIPPED_ERROR
+            self.positive_overshoot.error = CLIPPED_ERROR
+            self.negative_overshoot.error = CLIPPED_ERROR
+            return
+
         mid = (data.max + data.min) / 2
         high = low = None
 
@@ -316,6 +336,13 @@ class TimeMeasurer(AnalogMeasurer):
         measures=[positive_width, negative_width, positive_duty, negative_duty])
 
     def measure_range(self, data: AnalogSpan):
+        if data.clipped:
+            self.positive_width.error = CLIPPED_ERROR
+            self.negative_width.error = CLIPPED_ERROR
+            self.positive_duty.error = CLIPPED_ERROR
+            self.negative_duty.error = CLIPPED_ERROR
+            self.cycle_rms.error = CLIPPED_ERROR
+
         start_index = int(len(data) / 2)
 
         mid = (data.max + data.min) / 2
@@ -426,8 +453,9 @@ class TimeMeasurer(AnalogMeasurer):
             error_string = "Crossings Not Found"
             self.period.error = error_string
             self.frequency.error = error_string
-            self.positive_width.error = error_string
-            self.negative_width.error = error_string
-            self.positive_duty.error = error_string
-            self.negative_duty.error = error_string
-            self.cycle_rms.error = error_string
+            if not data.clipped:
+                self.positive_width.error = error_string
+                self.negative_width.error = error_string
+                self.positive_duty.error = error_string
+                self.negative_duty.error = error_string
+                self.cycle_rms.error = error_string
