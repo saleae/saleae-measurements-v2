@@ -34,7 +34,7 @@ def compute_low(data: AnalogSpan, mid: float):
 
 class VoltageMeasurer(AnalogMeasurer):
     peak_to_peak = Measure("Peak-to-Peak", type=float,
-                           description="Voltage difference between highest and lowest points.", units="V")
+                           description="Voltage difference between maximum and minimum points.", units="V")
     minimum = Measure(
         "Min", type=float, description="Lowest voltage value of the waveform.", units="V")
     maximum = Measure(
@@ -52,7 +52,7 @@ class VoltageMeasurer(AnalogMeasurer):
     base = Measure("Base", type=float,
                    description="Most prevalent voltage of the lower 50% of the waveform.", units="V")
     rms = Measure("RMS", type=float,
-                  description="Root Mean Square (RMS) taken over the full waveform, ground relative.", units="V")
+                  description="Root Mean Square (RMS) taken over the full waveform, ground referenced.", units="V")
 
     max_annotation = Annotation(measures=[peak_to_peak, maximum])
     min_annotation = Annotation(measures=[peak_to_peak, minimum])
@@ -109,9 +109,9 @@ class PulseMeasurer(AnalogMeasurer):
     fall_time = Measure("Fall Time", type=float,
                         description="Time waveform takes to fall from 90% to 10%.", units="s")
     positive_overshoot = Measure("+Overshoot", type=float,
-                                 description="Magnitude from the top of the signal to the positive peak voltage.", units="V")
+                                 description="Magnitude from the top voltage to the maximum voltage.", units="V")
     negative_overshoot = Measure("-Overshoot", type=float,
-                                 description="Magnitude from the bottom of the signal to the negative peak voltage.", units="V")
+                                 description="Magnitude from the base voltage to the minimum voltage.", units="V")
 
     rise_time_annotation = Annotation(measures=[rise_time])
     fall_time_annotation = Annotation(measures=[fall_time])
@@ -208,15 +208,15 @@ class TimeMeasurer(AnalogMeasurer):
     frequency = Measure("Frequency", type=float,
                         description="Cycles completed per second, computed from the period of a single cycle.", units="Hz")
     positive_width = Measure("Pos Width", type=float,
-                             description="Time waveform is above the midpoint in a cycle.", units="s")
+                             description="Time waveform spends above the midpoint in a cycle.", units="s")
     negative_width = Measure("Neg Width", type=float,
-                             description="Time waveform is below the midpoint in a cycle.", units="s")
+                             description="Time waveform sends below the midpoint in a cycle.", units="s")
     positive_duty = Measure("Pos Duty", type=float,
                             description="Percentage of cycle waveform is above the midpoint.", units="%")
     negative_duty = Measure("Neg Duty", type=float,
                             description="Percentage of cycle waveform is below the midpoint.", units="%")
     cycle_rms = Measure("Cycle RMS", type=float,
-                        description="RMS value for a single waveform cycle.", units="V")
+                        description="RMS value for a single waveform cycle, ground referenced.", units="V")
 
     positive_side_annotation = Annotation(
         measures=[period, frequency, positive_width, positive_duty, negative_duty, cycle_rms])
