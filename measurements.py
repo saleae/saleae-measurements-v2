@@ -7,6 +7,7 @@ from saleae.measurements import (AnalogMeasurer, Annotation, HorizontalRule,
                                  Measure, VerticalRule)
 
 CLIPPED_ERROR = 'Clipped'
+SIGNAL_TOO_SMALL_ERROR = 'Amplitude too small'
 
 def is_clipped(data: AnalogSpan):
     """
@@ -365,9 +366,28 @@ class TimeMeasurer(AnalogMeasurer):
 
         start_value = data[start_index]
         if (abs(start_value - mid) < hysteresis):
-            lt_index = data.find_lt(mid - hysteresis, start=start_index)
-            gt_index = data.find_gt(mid - hysteresis, start=start_index)
-            start_index = min(lt_index, gt_index)
+            right_lt_index = data.find_lt(mid - hysteresis, start=start_index)
+            right_gt_index = data.find_gt(mid + hysteresis, start=start_index)
+            left_lt_index = data.rfind_lt(mid - hysteresis, end=start_index)
+            left_gt_index = data.rfind_gt(mid + hysteresis, end=start_index)
+            # find the nearest sample index that is outside of the hysteresis range.
+            indexes = [right_lt_index, right_gt_index, left_lt_index, left_gt_index]
+            valid_indexes = [v for v in indexes if v is not None]
+            if not valid_indexes:
+                # in this case, no sample in the data is outside of the hysteresis zone.
+                # since hysteresis is always smaller than the amplitude, this should only happen for a constant value signal.
+                if not is_clipped(data):
+                    self.period.error = SIGNAL_TOO_SMALL_ERROR
+                    self.frequency.error = SIGNAL_TOO_SMALL_ERROR
+                    self.positive_width.error = SIGNAL_TOO_SMALL_ERROR
+                    self.negative_width.error = SIGNAL_TOO_SMALL_ERROR
+                    self.positive_duty.error = SIGNAL_TOO_SMALL_ERROR
+                    self.negative_duty.error = SIGNAL_TOO_SMALL_ERROR
+                    self.cycle_rms.error = SIGNAL_TOO_SMALL_ERROR
+                return
+            closest_index = min(valid_indexes, key=lambda x: abs(x - start_index))
+
+            start_index = closest_index
 
 
         left_crossing = right_crossing = extra_left_crossing = extra_right_crossing = None
