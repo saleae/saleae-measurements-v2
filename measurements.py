@@ -312,6 +312,8 @@ class PulseMeasurer(AnalogMeasurer):
             return (None, None, None, error if error else "Edge Not Found")
 
 
+FREQUENCY_HYSTERESIS_PCT = 0.1
+
 class TimeMeasurer(AnalogMeasurer):
     period = Measure("Period", type=float,
                      description="Period", units="s")
@@ -346,6 +348,14 @@ class TimeMeasurer(AnalogMeasurer):
         start_index = int(len(data) / 2)
 
         mid = (data.max + data.min) / 2
+        hysteresis = (data.max - data.min) * FREQUENCY_HYSTERESIS_PCT
+
+        start_value = data[start_index]
+        if (abs(start_value - mid) < hysteresis):
+            lt_index = data.find_lt(mid - hysteresis, start=start_index)
+            gt_index = data.find_gt(mid - hysteresis, start=start_index)
+            start_index = min(lt_index, gt_index)
+
 
         left_crossing = right_crossing = extra_left_crossing = extra_right_crossing = None
 
@@ -354,10 +364,12 @@ class TimeMeasurer(AnalogMeasurer):
         # TODO: support a fallback, where if a cycle isn't found on one side, we should search the otherside.
         is_start_above_mid = data[start_index] >= mid
 
+        # We use the mid value to determine where we are in the period, and whether we should search above or below for crossings.
         left_func = data.rfind_lt if is_start_above_mid else data.rfind_ge
         right_func = data.find_lt if is_start_above_mid else data.find_ge
         extra_left_func = data.rfind_ge if is_start_above_mid else data.rfind_lt
         extra_right_func = data.find_ge if is_start_above_mid else data.find_lt
+        extra_hysteresis = -hysteresis if is_start_above_mid else hysteresis
         left_crossing = left_func(mid, end=start_index)
         right_crossing = right_func(mid, start=start_index)
 
@@ -367,13 +379,11 @@ class TimeMeasurer(AnalogMeasurer):
 
             main_width = float(right_crossing_time - left_crossing_time)
 
-            if is_start_above_mid:
-                self.positive_width.value = main_width
-            else:
-                self.negative_width.value = main_width
-
-            extra_left_crossing = extra_left_func(mid, end=left_crossing)
-            extra_right_crossing = extra_right_func(mid, start=right_crossing)
+            # Move past the hysteresis point
+            extra_left_crossing_start = left_func(mid + extra_hysteresis, end=left_crossing)
+            extra_left_crossing = extra_left_func(mid, end=extra_left_crossing_start)
+            extra_right_crossing_start = right_func(mid + extra_hysteresis, start=right_crossing)
+            extra_right_crossing = extra_right_func(mid, start=extra_right_crossing_start)
 
             if extra_left_crossing is not None or extra_right_crossing is not None:
                 # use the right side IF we started above the cycle, AND the right side is valid, OR
@@ -391,8 +401,8 @@ class TimeMeasurer(AnalogMeasurer):
                 center_crossing_time = data.sample_index_to_time(
                     center_crossing)
 
-                self.center_annotation.value = VerticalRule(
-                    time=center_crossing_time)
+
+                self.center_annotation.value = VerticalRule(time=center_crossing_time)
 
                 # left side is positive IF: (A) is_start_above_mid & use_right_side or (B) !is_start_above_mid & !use_right_side
                 first_time_is_positive = (is_start_above_mid and use_right_side) or (
@@ -405,14 +415,13 @@ class TimeMeasurer(AnalogMeasurer):
                 extra_width = float((
                     extra_crossing_time - right_crossing_time) if use_right_side else (left_crossing_time - extra_crossing_time))
 
-                if is_start_above_mid:
-                    self.negative_width.value = extra_width
-                else:
-                    self.positive_width.value = extra_width
 
                 period = float(last_crossing_time - first_crossing_time)
                 positive_width = main_width if is_start_above_mid else extra_width
                 negative_width = extra_width if is_start_above_mid else main_width
+
+                self.positive_width.value = positive_width
+                self.negative_width.value = negative_width
 
                 frequency = 1 / period
                 positive_duty = positive_width / period * 100
