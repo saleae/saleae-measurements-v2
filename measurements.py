@@ -8,6 +8,13 @@ from saleae.measurements import (AnalogMeasurer, Annotation, HorizontalRule,
 
 CLIPPED_ERROR = 'Clipped'
 
+def is_clipped(data: AnalogSpan):
+    """
+    Return True if the data is at the ADC rails.
+    """
+    return data.min == data._adc_to_voltage(data.acquisition_info.min_adc_code) \
+           or data.max == data._adc_to_voltage(data.acquisition_info.max_adc_code)
+
 def rms(data: AnalogSpan):
     # TODO: numpy accelerate
     sum_of_squares = sum(x**2 for x in data)
@@ -69,7 +76,7 @@ class VoltageMeasurer(AnalogMeasurer):
     base_annotation = Annotation(measures=[base, amplitude])
 
     def measure_range(self, data: AnalogSpan):
-        if data.clipped:
+        if is_clipped(data):
             self.peak_to_peak.error = CLIPPED_ERROR
             self.minimum.error = CLIPPED_ERROR
             self.maximum.error = CLIPPED_ERROR
@@ -139,7 +146,7 @@ class PulseMeasurer(AnalogMeasurer):
     negative_overshoot_annotation = Annotation(measures=[negative_overshoot])
 
     def measure_range(self, data: AnalogSpan):
-        if data.clipped:
+        if is_clipped(data):
             self.rise_time.error = CLIPPED_ERROR
             self.fall_time.error = CLIPPED_ERROR
             self.positive_overshoot.error = CLIPPED_ERROR
@@ -344,7 +351,7 @@ class TimeMeasurer(AnalogMeasurer):
         measures=[positive_width, negative_width, positive_duty, negative_duty])
 
     def measure_range(self, data: AnalogSpan):
-        if data.clipped:
+        if is_clipped(data):
             self.positive_width.error = CLIPPED_ERROR
             self.negative_width.error = CLIPPED_ERROR
             self.positive_duty.error = CLIPPED_ERROR
@@ -468,7 +475,7 @@ class TimeMeasurer(AnalogMeasurer):
             error_string = "Crossings Not Found"
             self.period.error = error_string
             self.frequency.error = error_string
-            if not data.clipped:
+            if not is_clipped(data):
                 self.positive_width.error = error_string
                 self.negative_width.error = error_string
                 self.positive_duty.error = error_string
