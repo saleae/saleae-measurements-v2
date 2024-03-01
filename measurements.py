@@ -45,12 +45,12 @@ class VoltageMeasurer(AnalogMeasurer):
                   description="Midpoint voltage between maximum and minimum.", units="V")
 
     amplitude = Measure("Amplitude", type=float,
-                        description="Magnitude from base to top value.", units="V")
+                        description="Voltage difference between base and top values.", units="V")
 
     top = Measure("Top", type=float,
-                  description="Most prevalent voltage of the upper 50% of the waveform.", units="V")
+                  description="Most prevalent voltage above the midpoint of the waveform.", units="V")
     base = Measure("Base", type=float,
-                   description="Most prevalent voltage of the lower 50% of the waveform.", units="V")
+                   description="Most prevalent voltage below the midpoint of the waveform.", units="V")
     rms = Measure("RMS", type=float,
                   description="Root Mean Square (RMS) taken over the full waveform, ground referenced.", units="V")
 
