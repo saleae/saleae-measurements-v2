@@ -2,7 +2,7 @@
   "name": "Saleae Measurements V2",
   "apiVersion": "1.1.0",
   "author": "Saleae",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Saleae built-in V2 Measurements",
   "extensions": {
     "Voltage Measurements": {
