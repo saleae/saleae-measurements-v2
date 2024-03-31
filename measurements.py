@@ -1,6 +1,6 @@
 import math
 from statistics import mode
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from saleae.data import AnalogSpan, GraphTimeDelta
 from saleae.measurements import (AnalogMeasurer, Annotation, HorizontalRule,
@@ -14,7 +14,8 @@ def is_clipped(data: AnalogSpan):
     Return True if the data is at the ADC rails.
     """
     return data.min == data._adc_to_voltage(data.acquisition_info.min_adc_code) \
-           or data.max == data._adc_to_voltage(data.acquisition_info.max_adc_code)
+        or data.max == data._adc_to_voltage(data.acquisition_info.max_adc_code)
+
 
 def rms(data: AnalogSpan):
     # TODO: numpy accelerate
@@ -44,6 +45,105 @@ def compute_low(data: AnalogSpan, mid: float):
     if use_histogram_for_mode:
         return histogram_mode(data, lambda x: x < mid)
     return mode(x for x in data if x < mid)
+
+
+def find_three_closest(nums: List[Tuple[int, bool]], target: int):
+    # If the array has 3 or fewer elements, return the entire array
+    if len(nums) <= 3:
+        return nums
+
+    # Calculate the difference from the target for each number
+    diff_list = [abs(num[0] - target) for num in nums]
+
+    # Get the indices of the three smallest differences
+    # This maintains the original order of the elements
+    idx_three_closest = sorted(
+        range(len(diff_list)), key=lambda i: diff_list[i])[:3]
+
+    # Select the numbers at these indices, maintaining original order
+    closest_three = [nums[i] for i in sorted(idx_three_closest)]
+
+    return closest_three
+
+
+def find_starting_location(data, mid, hysteresis) -> Optional[int]:
+    start_index = int(len(data) / 2)
+    start_value = data[start_index]
+    if (abs(start_value - mid) < hysteresis):
+        right_lt_index = data.find_lt(mid - hysteresis, start=start_index)
+        right_gt_index = data.find_gt(mid + hysteresis, start=start_index)
+        left_lt_index = data.rfind_lt(mid - hysteresis, end=start_index)
+        left_gt_index = data.rfind_gt(mid + hysteresis, end=start_index)
+        # find the nearest sample index that is outside of the hysteresis range.
+        indexes = [right_lt_index, right_gt_index,
+                   left_lt_index, left_gt_index]
+        valid_indexes = [v for v in indexes if v is not None]
+        if not valid_indexes:
+            # in this case, no sample in the data is outside of the hysteresis zone.
+            # since hysteresis is always smaller than the amplitude, this should only happen for a constant value signal.
+            return None
+        closest_index = min(
+            valid_indexes, key=lambda x: abs(x - start_index))
+
+        start_index = closest_index
+    return start_index
+
+
+def find_cycle(data, start_index, mid, hysteresis) -> Tuple[List[int], bool]:
+    # return a list of 2 or 3 crossings, and a boolean indicating if the first cycle is positive or negative.
+
+    # find up to 6 crossings. store the location, and if the signal on the right is above the threshold.
+    crossings: List[Tuple[int, bool]] = []
+
+    is_start_above_mid = data[start_index] >= mid
+
+    # We use the mid value to determine where we are in the period, and whether we should search above or below for crossings.
+    leading_left_func = data.rfind_lt if is_start_above_mid else data.rfind_ge
+    leading_right_func = data.find_lt if is_start_above_mid else data.find_ge
+    leading_hysteresis = -hysteresis if is_start_above_mid else hysteresis
+
+    trailing_left_func = data.rfind_ge if is_start_above_mid else data.rfind_lt
+    trailing_right_func = data.find_ge if is_start_above_mid else data.find_lt
+    trailing_hysteresis = hysteresis if is_start_above_mid else +hysteresis
+
+    # find up to 3 crossings in each direction.
+    l1 = leading_left_func(mid, end=start_index)
+
+    if l1 is not None:
+        crossings.insert(0, (l1, is_start_above_mid))
+        # advance to hysteresis level.
+        l1 = leading_left_func(mid + leading_hysteresis, end=l1)
+        if l1 is not None:
+            l2 = trailing_left_func(mid, end=l1)
+            if l2 is not None:
+                crossings.insert(0, (l2, not is_start_above_mid))
+                # advance to hysteresis level.
+                l2 = trailing_left_func(mid + trailing_hysteresis, end=l2)
+                if l2 is not None:
+                    l3 = leading_left_func(mid, end=l2)
+                    if l3 is not None:
+                        crossings.insert(0, (l3, is_start_above_mid))
+    r1 = leading_right_func(mid, start=start_index)
+    if r1 is not None:
+        crossings.append((r1, not is_start_above_mid))
+        # advance to hysteresis level.
+        r1 = leading_right_func(mid + leading_hysteresis, start=r1)
+        if r1 is not None:
+            r2 = trailing_right_func(mid, start=r1)
+            if r2 is not None:
+                crossings.append((r2, is_start_above_mid))
+                # advance to hysteresis level.
+                r2 = trailing_right_func(mid + trailing_hysteresis, start=r2)
+                if r2 is not None:
+                    r3 = leading_right_func(mid, start=r2)
+                    if r3 is not None:
+                        crossings.append((r3, not is_start_above_mid))
+
+    # we want to take the 3 crossings closest to the center.
+    closest_crossings = find_three_closest(crossings, start_index)
+    print("crossings")
+    print(crossings)
+    return ([x[0] for x in closest_crossings], closest_crossings[0][1])
 
 
 class VoltageMeasurer(AnalogMeasurer):
@@ -326,7 +426,8 @@ class PulseMeasurer(AnalogMeasurer):
             return (None, None, None, error if error else "Edge Not Found")
 
 
-FREQUENCY_HYSTERESIS_PCT = 0.1
+FREQUENCY_HYSTERESIS_PCT = 0.2
+
 
 class TimeMeasurer(AnalogMeasurer):
     period = Measure("Period", type=float,
@@ -359,138 +460,16 @@ class TimeMeasurer(AnalogMeasurer):
             self.negative_duty.error = CLIPPED_ERROR
             self.cycle_rms.error = CLIPPED_ERROR
 
-        start_index = int(len(data) / 2)
-
         mid = (data.max + data.min) / 2
         hysteresis = (data.max - data.min) * FREQUENCY_HYSTERESIS_PCT
 
-        start_value = data[start_index]
-        if (abs(start_value - mid) < hysteresis):
-            right_lt_index = data.find_lt(mid - hysteresis, start=start_index)
-            right_gt_index = data.find_gt(mid + hysteresis, start=start_index)
-            left_lt_index = data.rfind_lt(mid - hysteresis, end=start_index)
-            left_gt_index = data.rfind_gt(mid + hysteresis, end=start_index)
-            # find the nearest sample index that is outside of the hysteresis range.
-            indexes = [right_lt_index, right_gt_index, left_lt_index, left_gt_index]
-            valid_indexes = [v for v in indexes if v is not None]
-            if not valid_indexes:
-                # in this case, no sample in the data is outside of the hysteresis zone.
-                # since hysteresis is always smaller than the amplitude, this should only happen for a constant value signal.
-                if not is_clipped(data):
-                    self.period.error = SIGNAL_TOO_SMALL_ERROR
-                    self.frequency.error = SIGNAL_TOO_SMALL_ERROR
-                    self.positive_width.error = SIGNAL_TOO_SMALL_ERROR
-                    self.negative_width.error = SIGNAL_TOO_SMALL_ERROR
-                    self.positive_duty.error = SIGNAL_TOO_SMALL_ERROR
-                    self.negative_duty.error = SIGNAL_TOO_SMALL_ERROR
-                    self.cycle_rms.error = SIGNAL_TOO_SMALL_ERROR
-                return
-            closest_index = min(valid_indexes, key=lambda x: abs(x - start_index))
+        start_index = find_starting_location(data, mid, hysteresis)
 
-            start_index = closest_index
+        (closest_crossings, first_cycle_positive) = find_cycle(
+            data, start_index, mid, hysteresis)
 
-
-        left_crossing = right_crossing = extra_left_crossing = extra_right_crossing = None
-
-        # if the start location is above the mid level, we will find 2 edges to the right.
-        # otherwise, we will find 2 edges to the left.
-        # TODO: support a fallback, where if a cycle isn't found on one side, we should search the otherside.
-        is_start_above_mid = data[start_index] >= mid
-
-        # We use the mid value to determine where we are in the period, and whether we should search above or below for crossings.
-        left_func = data.rfind_lt if is_start_above_mid else data.rfind_ge
-        right_func = data.find_lt if is_start_above_mid else data.find_ge
-        extra_left_func = data.rfind_ge if is_start_above_mid else data.rfind_lt
-        extra_right_func = data.find_ge if is_start_above_mid else data.find_lt
-        extra_hysteresis = -hysteresis if is_start_above_mid else hysteresis
-        left_crossing = left_func(mid, end=start_index)
-        right_crossing = right_func(mid, start=start_index)
-
-        if left_crossing is not None and right_crossing is not None:
-            right_crossing_time = data.sample_index_to_time(right_crossing)
-            left_crossing_time = data.sample_index_to_time(left_crossing)
-
-            main_width = float(right_crossing_time - left_crossing_time)
-
-            # Move past the hysteresis point
-            extra_left_crossing_start = left_func(mid + extra_hysteresis, end=left_crossing)
-            extra_left_crossing = extra_left_func(mid, end=extra_left_crossing_start)
-            extra_right_crossing_start = right_func(mid + extra_hysteresis, start=right_crossing)
-            extra_right_crossing = extra_right_func(mid, start=extra_right_crossing_start)
-
-            if extra_left_crossing is not None or extra_right_crossing is not None:
-                # use the right side IF we started above the cycle, AND the right side is valid, OR
-                # IF we started below the cycle, BUT the left side is not valid
-                use_right_side = (is_start_above_mid and extra_right_crossing is not None) or (
-                    not is_start_above_mid and extra_left_crossing is None)
-
-                extra_crossing_time = data.sample_index_to_time(
-                    extra_right_crossing) if use_right_side else data.sample_index_to_time(extra_left_crossing)
-                first_crossing = left_crossing if use_right_side else extra_left_crossing
-                last_crossing = extra_right_crossing if use_right_side else right_crossing
-                center_crossing = right_crossing if use_right_side else left_crossing
-                first_crossing_time = data.sample_index_to_time(first_crossing)
-                last_crossing_time = data.sample_index_to_time(last_crossing)
-                center_crossing_time = data.sample_index_to_time(
-                    center_crossing)
-
-
-                self.center_annotation.value = VerticalRule(time=center_crossing_time)
-
-                # left side is positive IF: (A) is_start_above_mid & use_right_side or (B) !is_start_above_mid & !use_right_side
-                first_time_is_positive = (is_start_above_mid and use_right_side) or (
-                    not is_start_above_mid and not use_right_side)
-                self.positive_side_annotation.value = VerticalRule(
-                    time=first_crossing_time if first_time_is_positive else last_crossing_time)
-                self.negative_side_annotation.value = VerticalRule(
-                    time=last_crossing_time if first_time_is_positive else first_crossing_time)
-
-                extra_width = float((
-                    extra_crossing_time - right_crossing_time) if use_right_side else (left_crossing_time - extra_crossing_time))
-
-
-                period = float(last_crossing_time - first_crossing_time)
-                positive_width = main_width if is_start_above_mid else extra_width
-                negative_width = extra_width if is_start_above_mid else main_width
-
-                self.positive_width.value = positive_width
-                self.negative_width.value = negative_width
-
-                frequency = 1 / period
-                positive_duty = positive_width / period * 100
-                negative_duty = negative_width / period * 100
-
-                self.period.value = period
-                self.frequency.value = frequency
-                self.positive_duty.value = positive_duty
-                self.negative_duty.value = negative_duty
-
-                if self.cycle_rms.enabled:
-                    slice = data[first_crossing:last_crossing]
-                    self.cycle_rms.value = rms(slice)
-            else:
-                # all 3 point measurements failed.
-                error_string = "3rd Crossing Not Found"
-                self.period.error = error_string
-                self.frequency.error = error_string
-                self.positive_duty.error = error_string
-                self.negative_duty.error = error_string
-                self.cycle_rms.error = error_string
-                if is_start_above_mid:
-                    self.negative_width.error = error_string
-
-                    self.positive_side_annotation.value = VerticalRule(
-                        time=left_crossing_time)
-                    self.center_annotation.value = VerticalRule(
-                        time=right_crossing_time)
-                else:
-                    self.positive_width.error = error_string
-
-                    self.negative_side_annotation.value = VerticalRule(
-                        time=left_crossing_time)
-                    self.center_annotation.value = VerticalRule(
-                        time=right_crossing_time)
-        else:
+        if len(closest_crossings) <= 1:
+            # we did not get enough crossings for any measurement
             # all measurements failed
             error_string = "Crossings Not Found"
             self.period.error = error_string
@@ -501,3 +480,80 @@ class TimeMeasurer(AnalogMeasurer):
                 self.positive_duty.error = error_string
                 self.negative_duty.error = error_string
                 self.cycle_rms.error = error_string
+
+        if len(closest_crossings) == 2:
+            # we have a single pulse. There is no complete frequency. we should return positive or negative width, based on state between points.
+            left_crossing = closest_crossings[0]
+            right_crossing = closest_crossings[1]
+
+            left_crossing_time = data.sample_index_to_time(left_crossing)
+            right_crossing_time = data.sample_index_to_time(right_crossing)
+            if first_cycle_positive:
+                self.positive_side_annotation.value = VerticalRule(
+                    time=left_crossing_time)
+                self.center_annotation.value = VerticalRule(
+                    time=right_crossing_time)
+                self.positive_width.value = float(
+                    right_crossing_time - left_crossing_time)
+            else:
+                self.negative_side_annotation.value = VerticalRule(
+                    time=left_crossing_time)
+                self.center_annotation.value = VerticalRule(
+                    time=right_crossing_time)
+                self.negative_width.value = float(
+                    right_crossing_time - left_crossing_time)
+
+            error_string = "3rd Crossing Not Found"
+            self.period.error = error_string
+            self.frequency.error = error_string
+            if not is_clipped(data):
+                if first_cycle_positive:
+                    self.negative_width.error = error_string
+                else:
+                    self.positive_width.error = error_string
+                self.positive_duty.error = error_string
+                self.negative_duty.error = error_string
+                self.cycle_rms.error = error_string
+
+        if len(closest_crossings) == 3:
+            # we have 3 crossings!
+            left_crossing = closest_crossings[0]
+            center_crossing = closest_crossings[1]
+            right_crossing = closest_crossings[2]
+
+            if (left_crossing >= center_crossing or center_crossing >= right_crossing):
+                raise ValueError(
+                    f"Crossings are not in order. This should not happen. crossings: {closest_crossings}")
+            left_crossing_time = data.sample_index_to_time(left_crossing)
+            right_crossing_time = data.sample_index_to_time(right_crossing)
+            center_crossing_time = data.sample_index_to_time(center_crossing)
+
+            self.center_annotation.value = VerticalRule(
+                time=center_crossing_time)
+            self.negative_side_annotation.value = VerticalRule(
+                time=right_crossing_time if first_cycle_positive else left_crossing_time)
+            self.positive_side_annotation.value = VerticalRule(
+                time=left_crossing_time if first_cycle_positive else right_crossing_time)
+
+            period = float(right_crossing_time - left_crossing_time)
+            if period == 0:
+                raise ValueError(
+                    f"Period is zero. This should not happen. right: {right_crossing_time}, left: {left_crossing_time}. crossings: {closest_crossings}")
+            frequency = 1 / period
+            positive_width = abs(float(
+                center_crossing_time - (left_crossing_time if first_cycle_positive else right_crossing_time)))
+            negative_width = abs(float(
+                center_crossing_time - (right_crossing_time if first_cycle_positive else left_crossing_time)))
+            positive_duty = positive_width / period * 100
+            negative_duty = negative_width / period * 100
+
+            self.period.value = period
+            self.frequency.value = frequency
+            self.positive_duty.value = positive_duty
+            self.negative_duty.value = negative_duty
+            self.positive_width.value = positive_width
+            self.negative_width.value = negative_width
+
+            if self.cycle_rms.enabled:
+                cycle_slice = data[left_crossing:right_crossing]
+                self.cycle_rms.value = rms(cycle_slice)
