@@ -67,6 +67,8 @@ def find_three_closest(nums: List[Tuple[int, bool]], target: int):
 
 
 def find_starting_location(data, mid, hysteresis) -> Optional[int]:
+    """Find a starting location that is outside of the hysteresis band."""
+
     start_index = int(len(data) / 2)
     start_value = data[start_index]
     if (abs(start_value - mid) < hysteresis):
@@ -90,8 +92,14 @@ def find_starting_location(data, mid, hysteresis) -> Optional[int]:
 
 
 def find_cycle(data, start_index, mid, hysteresis) -> Tuple[List[int], bool]:
-    # return a list of 2 or 3 crossings, and a boolean indicating if the first cycle is positive or negative.
+    """
+    Find the 2 or 3 closest crossing from `start_index`.
+    A positive crossing must go from `mid - hysteresis` to `> mid`.
+    A negative crossing must go from `mid + hysteresis` to `< mid`.
 
+    Returns a tuple of the 2 or 3 closest crossings, and a boolean indicating if the first cycle is positive or negative.
+
+    """
     # find up to 6 crossings. store the location, and if the signal on the right is above the threshold.
     crossings: List[Tuple[int, bool]] = []
 
@@ -104,7 +112,7 @@ def find_cycle(data, start_index, mid, hysteresis) -> Tuple[List[int], bool]:
 
     trailing_left_func = data.rfind_ge if is_start_above_mid else data.rfind_lt
     trailing_right_func = data.find_ge if is_start_above_mid else data.find_lt
-    trailing_hysteresis = hysteresis if is_start_above_mid else +hysteresis
+    trailing_hysteresis = hysteresis if is_start_above_mid else -hysteresis
 
     # find up to 3 crossings in each direction.
     l1 = leading_left_func(mid, end=start_index)
@@ -123,6 +131,7 @@ def find_cycle(data, start_index, mid, hysteresis) -> Tuple[List[int], bool]:
                     l3 = leading_left_func(mid, end=l2)
                     if l3 is not None:
                         crossings.insert(0, (l3, is_start_above_mid))
+
     r1 = leading_right_func(mid, start=start_index)
     if r1 is not None:
         crossings.append((r1, not is_start_above_mid))
@@ -141,8 +150,6 @@ def find_cycle(data, start_index, mid, hysteresis) -> Tuple[List[int], bool]:
 
     # we want to take the 3 crossings closest to the center.
     closest_crossings = find_three_closest(crossings, start_index)
-    print("crossings")
-    print(crossings)
     return ([x[0] for x in closest_crossings], closest_crossings[0][1])
 
 
