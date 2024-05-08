@@ -2,6 +2,8 @@ import math
 from statistics import mode
 from typing import List, Optional, Tuple
 
+import numpy as np
+
 from saleae.data import AnalogSpan, GraphTimeDelta
 from saleae.measurements import (AnalogMeasurer, Annotation, HorizontalRule,
                                  Measure, VerticalRule)
@@ -17,11 +19,26 @@ def is_clipped(data: AnalogSpan):
         or data.max == data._adc_to_voltage(data.acquisition_info.max_adc_code)
 
 
+def mean(data: AnalogSpan):
+    total_sum = 0
+    total_samples = 0
+
+    for chunk in data.raw_chunks():
+        total_sum += chunk._convert_sample(np.sum(chunk.raw_samples, dtype=np.int64)) + chunk.voltage_transform.offset * (len(chunk.raw_samples) - 1)
+        total_samples += len(chunk.raw_samples)
+
+    return total_sum / total_samples
+
+
 def rms(data: AnalogSpan):
-    # TODO: numpy accelerate
-    sum_of_squares = sum(x**2 for x in data)
-    rms = math.sqrt(sum_of_squares / len(data))
-    return rms
+    total_sum = 0
+    total_samples = 0
+
+    for chunk in data.raw_chunks():
+        total_sum += np.sum(chunk.samples ** 2)
+        total_samples += len(chunk.raw_samples)
+
+    return math.sqrt(total_sum / total_samples)
 
 
 def histogram_mode(data: AnalogSpan, filter):
@@ -53,9 +70,7 @@ def find_three_closest(nums: List[Tuple[int, bool]], target: int):
         return nums
 
     # Calculate the difference from the target for each number
-    diff_list = [abs(num[0] - target) for num in nums]
-
-    # Get the indices of the three smallest differences
+    diff_list = [abs(num[0] - target) for num in nums] #Get the indices of the three smallest differences
     # This maintains the original order of the elements
     idx_three_closest = sorted(
         range(len(diff_list)), key=lambda i: diff_list[i])[:3]
@@ -209,9 +224,9 @@ class VoltageMeasurer(AnalogMeasurer):
         # mean is the average of all samples.
         # TODO: replace with numpy
         if self.mean.enabled:
-            mean = sum(data) / len(data)
-            self.mean.value = mean
-            self.mean_annotation.value = HorizontalRule(value=mean)
+            mean_value = mean(data)
+            self.mean.value = mean_value
+            self.mean_annotation.value = HorizontalRule(value=mean_value)
 
         # amplitude is high - low.
         high = low = None
