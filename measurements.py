@@ -24,7 +24,7 @@ def mean(data: AnalogSpan):
     total_samples = 0
 
     for chunk in data.raw_chunks():
-        total_sum += chunk._convert_sample(np.sum(chunk.raw_samples, dtype=np.int64)) + chunk.voltage_transform.offset * len(chunk.raw_samples)
+        total_sum += chunk._convert_sample(np.sum(chunk.raw_samples, dtype=np.int64)) + chunk.voltage_transform.offset * (len(chunk.raw_samples) - 1)
         total_samples += len(chunk.raw_samples)
 
     return total_sum / total_samples
